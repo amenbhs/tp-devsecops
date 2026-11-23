@@ -9,12 +9,11 @@ on:
 
 permissions:
   contents: read
+  security-events: write
 
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
-    env:
-      DOCKER_IMAGE_NAME: ${{ secrets.DOCKERHUB_USERNAME }}/democyber:latest
 
     steps:
       # 1. Récupération du code (historique complet pour Gitleaks et SonarCloud)
@@ -53,26 +52,42 @@ jobs:
       - name: Build and test with Maven
         run: mvn -B clean verify
 
-      # 4. TP3 - Analyse SonarCloud (nécessite les secrets Sonar)
+      # 4. TP3 - Analyse SonarCloud (ignorée tant que le secret n'est pas créé)
       - name: SonarCloud Scan
-        if: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-        run: >
-          mvn -B org.sonarsource.scanner.maven:sonar-maven-plugin:sonar
-          -Dsonar.organization=${{ secrets.SONAR_ORGANIZATION }}
-          -Dsonar.projectKey=${{ secrets.SONAR_PROJECT_KEY }}
+          SONAR_ORGANIZATION: ${{ secrets.SONAR_ORGANIZATION }}
+          SONAR_PROJECT_KEY: ${{ secrets.SONAR_PROJECT_KEY }}
+        run: |
+          if [ -z "$SONAR_TOKEN" ]; then
+            echo "SONAR_TOKEN absent : analyse SonarCloud ignoree jusqu'a la creation du secret."
+            exit 0
+          fi
+          mvn -B org.sonarsource.scanner.maven:sonar-maven-plugin:sonar \
+            -Dsonar.organization="$SONAR_ORGANIZATION" \
+            -Dsonar.projectKey="$SONAR_PROJECT_KEY"
 
       # 5. TP1 / TP2 - Docker : login, build, test
       - name: Login to Docker Hub
-        uses: docker/login-action@v3
         if: github.event_name == 'push'
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          if [ -z "$DOCKERHUB_USERNAME" ] || [ -z "$DOCKERHUB_TOKEN" ]; then
+            echo "Secrets Docker Hub absents : login ignore."
+            exit 0
+          fi
+          echo "$DOCKERHUB_TOKEN" | docker login -u "$DOCKERHUB_USERNAME" --password-stdin
 
       - name: Build Docker image
-        run: docker build -t democyber:latest -t $DOCKER_IMAGE_NAME .
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+        run: |
+          docker build -t democyber:latest .
+          if [ -n "$DOCKERHUB_USERNAME" ]; then
+            docker tag democyber:latest "$DOCKERHUB_USERNAME/democyber:latest"
+          fi
 
       - name: Test Docker image locally
         run: |
@@ -90,7 +105,7 @@ jobs:
       # 6. TP2 - Analyse Trivy
       # Rapport JSON (ne fait pas échouer) -> artifact
       - name: Trivy scan (JSON report)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.28.0
         with:
           image-ref: democyber:latest
           format: 'json'
@@ -108,7 +123,7 @@ jobs:
 
       # Contrôle bloquant : échoue si vulnérabilité CRITICAL ou HIGH
       - name: Trivy scan (quality gate)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.28.0
         with:
           image-ref: democyber:latest
           format: 'table'
@@ -119,4 +134,12 @@ jobs:
       # 7. Publication sur Docker Hub (uniquement sur main, après tous les contrôles)
       - name: Push Docker image
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        run: docker push $DOCKER_IMAGE_NAME
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          if [ -z "$DOCKERHUB_USERNAME" ] || [ -z "$DOCKERHUB_TOKEN" ]; then
+            echo "Secrets Docker Hub absents : push ignore."
+            exit 0
+          fi
+          docker push "$DOCKERHUB_USERNAME/democyber:latest"
