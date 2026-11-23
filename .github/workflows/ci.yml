@@ -105,7 +105,7 @@ jobs:
       # 6. TP2 - Analyse Trivy
       # Rapport JSON (ne fait pas échouer) -> artifact
       - name: Trivy scan (JSON report)
-        uses: aquasecurity/trivy-action@v0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: democyber:latest
           format: 'json'
@@ -123,7 +123,7 @@ jobs:
 
       # Contrôle bloquant : échoue si vulnérabilité CRITICAL ou HIGH
       - name: Trivy scan (quality gate)
-        uses: aquasecurity/trivy-action@v0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: democyber:latest
           format: 'table'
